@@ -7,13 +7,13 @@ import * as d3 from "d3";
 const r = 20;
 const net = [];
 const links = [];
-var ref;
+var ref, nodeRef, linkRef;
 var width = 800;
 var height = 500;
 var simulation;
-var on = false;
 var op = 0;
-var prevNode;
+var prevNode = null;
+var nodes, edges, labels;
 
 class Edge {
 	constructor(from, to, weight) {
@@ -31,50 +31,62 @@ class Node {
 	}
 }
 
-function getMousePosition(e) {
-	let rect = document.getElementById("myArea").getBoundingClientRect();
-	let x = Math.round(e.clientX - rect.left);
-	let y = Math.round(e.clientY - rect.top);
-	return { x: x, y: y };
-}
-
 function clearCircles() {
 	net.length = 0;
-	const svg = d3.select(ref.current);
-	svg.selectChildren().remove();
+	clearSVG();
 }
 
 function clearSVG() {
-	const svg = d3.select(ref.current);
-	svg.selectChildren().remove();
+	const n = d3.select(nodeRef.current);
+	n.selectChildren().remove();
+	const l = d3.select(linkRef.current);
+	l.selectChildren().remove();
 }
 
 function drawNet() {
 	clearSVG();
-	const svg = d3.select(ref.current);
-	links.forEach((val) => {
-		svg.insert("line")
-			.attr("x1", val.source.x)
-			.attr("y1", val.source.y)
-			.attr("x2", val.target.x)
-			.attr("y2", val.target.y)
-			.attr("stroke", "black")
-			.attr("stroke-width", 3);
-	});
-	net.forEach((val) => {
-		svg.insert("circle")
-			.attr("cx", val.x)
-			.attr("cy", val.y)
-			.attr("r", r)
-			.attr("fill", "pink")
-			.attr("stroke", "black")
-			.attr("stroke-width", 2);
 
-		svg.insert("text")
-			.attr("x", val.x - 5 * val.id.length)
-			.attr("y", val.y + 5)
-			.text(val.id);
-	});
+	edges = d3
+		.select(linkRef.current)
+		.append("g")
+		.attr("id", "weights")
+		.selectAll("line")
+		.data(links)
+		.enter()
+		.append("line");
+
+	edges.style("stroke", "black");
+
+	nodes = d3
+		.select(nodeRef.current)
+		.append("g")
+		.attr("id", "circles")
+		.selectAll("circle")
+		.data(net)
+		.enter()
+		.append("circle")
+		.attr("r", r);
+
+	nodes
+		.style("fill", "pink")
+		.style("fill-opacity", "0.9")
+		.style("stroke", "#424242")
+		.style("stroke-width", "1px");
+
+	labels = d3
+		.select(nodeRef.current)
+		.append("g")
+		.attr("id", "labels")
+		.selectAll("text")
+		.data(net)
+		.enter()
+		.append("text")
+		.text(function (d) {
+			return d.id;
+		})
+		.attr("class", "label");
+
+	labels.style("text-anchor", "middle").style("font-size", "10px");
 }
 
 function changeOp(e) {
@@ -82,93 +94,112 @@ function changeOp(e) {
 	op = e.target.value;
 }
 
-function addLinks(e) {
+function handleLinks(event) {
 	const text = document.getElementById("edgeInput");
 	if (text.value.length === 0) {
-		alert("Can't enter edge without weight");
+		alert("Can't have empty edge input");
 		return;
 	}
-	const pos = getMousePosition(e);
+	const [x, y] = d3.pointer(event);
 
-	net.forEach((val) => {
-		if (
-			// tests to see if mouse selection is inside of a node
-			Math.sqrt(Math.pow(val.x - pos.x, 2) + Math.pow(val.y - pos.y, 2)) <
-			r + 4
-		) {
-			// first node in the edge pair
-			if (prevNode === null) {
-				prevNode = val;
-				return;
-			} else {
-				// if a node is already selected for edge creation
-				const edge = new Edge(prevNode, val, text.value);
-				links.push(edge);
-				prevNode = null;
-				simulation = d3
-					.forceSimulation()
-					//.force("x", d3.forceX(width / 2))
-					//.force("y", d3.forceY(height / 2))
-					.force("collide", d3.forceCollide(r + 5))
-					.force(
-						"link",
-						d3.forceLink(links).distance((link) => {
-							return link.weight * 10;
-						})
-					)
-					.on("tick", drawNet);
-				simulation.nodes(net);
-				return;
-			}
+	if (prevNode == null) {
+		prevNode = simulation.find(x, y, r);
+	} else {
+		const currNode = simulation.find(x, y, r);
+		if (currNode == null) {
+			prevNode = null;
+		} else {
+			links.push(new Edge(prevNode, currNode, text.value));
+			prevNode = null;
+			simulation.nodes(net);
+			simulation.alpha(1).restart();
+			drawNet();
 		}
-	});
+	}
 }
 
-function addCircle(e) {
+function handleNodes(event) {
+	const text = document.getElementById("nodeInput");
+	if (text.value.length === 0) {
+		alert("Can't have empty node input");
+		return;
+	}
+
+	const [x, y] = d3.pointer(event);
+	const n = new Node(text.value, x, y);
+	net.push(n);
+
+	simulation.nodes(net).on("tick", update);
+	simulation.alpha(1).restart();
+	drawNet();
+}
+
+function handleClick(event) {
 	if (op === 0) {
 		alert("Can't create Graph without Selecting Node radio button");
 		return;
 	}
 	if (op === "1") {
-		// if node is selected
-		const text = document.getElementById("nodeInput");
-		if (text.value.length === 0) {
-			alert("Can't enter Node with empty name");
-			return;
-		}
-		const pos = getMousePosition(e);
-		net.push(new Node(text.value, pos.x, pos.y));
-
-		if (!on) {
-			// turn the simulation on
-			on = true;
-
-			simulation = d3
-				.forceSimulation()
-				//.force("x", d3.forceX(width / 2))
-				//.force("y", d3.forceY(height / 2))
-				.force("collide", d3.forceCollide(r + 10))
-				.force(
-					"link",
-					d3.forceLink(links).distance((link) => {
-						return link.weight * 20;
-					})
-				)
-				.on("tick", drawNet);
-			simulation.nodes(net);
-		} else {
-			// restart the simulation with the new node
-			simulation.nodes(net);
-			simulation.alpha(1).restart();
-		}
-	} // if edge is selected
-	else {
-		addLinks(e);
+		handleNodes(event);
+		return;
 	}
+	if (op === "2") {
+		handleLinks(event);
+		return;
+	}
+
+	alert("a lot happend");
 }
 
-const Graph = () => {
+function update() {
+	edges
+		.attr("x1", function (d) {
+			return d.source.x;
+		})
+		.attr("y1", function (d) {
+			return d.source.y;
+		})
+		.attr("x2", function (d) {
+			return d.target.x;
+		})
+		.attr("y2", function (d) {
+			return d.target.y;
+		});
+	nodes
+		.attr("cx", function (d) {
+			return d.x;
+		})
+		.attr("cy", function (d) {
+			return d.y - 4;
+		});
+
+	labels
+		.attr("x", function (d) {
+			return d.x;
+		})
+		.attr("y", function (d) {
+			return d.y;
+		});
+}
+
+function Graph() {
 	ref = useRef();
+	nodeRef = useRef();
+	linkRef = useRef();
+	drawNet();
+	d3.select(ref.current).on("click", handleClick);
+	simulation = d3
+		.forceSimulation()
+		.force("x", d3.forceX(width / 2))
+		.force("y", d3.forceY(height / 2))
+		.force("collide", d3.forceCollide(r + 10))
+		//.force("charge", d3.forceManyBody().strength(-1000))
+		.force(
+			"link",
+			d3.forceLink(links).distance((link) => {
+				return link.weight * 20;
+			})
+		);
 
 	return (
 		<div className=" relative min-h-screen">
@@ -216,8 +247,10 @@ const Graph = () => {
 					height={height}
 					id="myArea"
 					className="border-4 m-auto"
-					onClick={addCircle}
-				></svg>
+				>
+					<g id="links" ref={linkRef}></g>
+					<g id="nodes" ref={nodeRef}></g>
+				</svg>
 
 				<button className="bg-cyan-200 border-2 border-black rounded-full w-auto font-medium mt-4 ml-2 mr-2 pl-2 pr-2">
 					Dijkstra
@@ -235,6 +268,6 @@ const Graph = () => {
 			<Footer />
 		</div>
 	);
-};
+}
 
 export default Graph;
